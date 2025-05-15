@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Wizard Game - Musik & Health Bars</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; }
+    canvas { display: block; margin: auto; }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 820px;
+      width: 200px;
+      font-family: sans-serif;
+      color: white;
+      white-space: pre-line;
+    }
+    button {
+      margin: 5px 0;
+      padding: 8px;
+      width: 100%;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+<div id="ui">
+  <div id="stats">Loading...</div>
+  <button onclick="upgradeDamage()">Upgrade Damage (50 pts)</button>
+  <button onclick="upgradeRate()">Upgrade Tembakan (50 pts)</button>
+  <button onclick="toggleMusic()">Mute / Unmute Music</button>
+</div>
+
+<script>
+  const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: '#000000',
+    physics: {
+      default: 'arcade',
+      arcade: { debug: false },
+    },
+    scene: {
+      preload: preload,
+      create: create,
+      update: update,
+    },
+  };
+
+  const game = new Phaser.Game(config);
+
+  let wizard, monsters, bullets, background;
+  let score = 0;
+  let damage = 1;
+  let shootDelay = 1000;
+  let lastShotTime = 0;
+  let statsText;
+  let level = 1;
+  let levelTime = 30;
+  let levelTimerText;
+  let timeRemaining = levelTime;
+  let monsterHpBase = 3;
+  let bgMusic;
+
+  function preload() {
+    this.load.image('background', 'https://i.ibb.co/H26b5jS/magic-temple-bg.jpg');
+    this.load.image('wizard', 'https://labs.phaser.io/assets/sprites/wizard.png');
+    this.load.image('monster', 'https://labs.phaser.io/assets/sprites/space-baddie.png');
+    this.load.image('bullet', 'https://labs.phaser.io/assets/sprites/bullet.png');
+
+    // Musik latar menegangkan
+    this.load.audio('bgMusic', 'https://cdn.pixabay.com/download/audio/2022/03/25/audio_12fddf09a0.mp3?filename=dark-magic-ambience-13267.mp3');
+  }
+
+  function create() {
+    background = this.add.image(400, 300, 'background').setDisplaySize(800, 600);
+
+    wizard = this.physics.add.image(400, 300, 'wizard').setScale(1.5);
+    wizard.setCollideWorldBounds(true);
+    wizard.maxHp = 20;
+    wizard.hp = wizard.maxHp;
+
+    monsters = this.physics.add.group();
+    bullets = this.physics.add.group();
+
+    this.time.addEvent({
+      delay: 1000,
+      callback: spawnMonster,
+      callbackScope: this,
+      loop: true,
+    });
+
+    this.physics.add.overlap(bullets, monsters, hitMonster, null, this);
+    this.physics.add.overlap(wizard, monsters, monsterHitWizard, null, this);
+
+    statsText = this.add.text(10, 10, '', { fontSize: '18px', fill: '#fff' });
+    levelTimerText = this.add.text(10, 40, '', { fontSize: '18px', fill: '#fff' });
+
+    this.time.addEvent({
+      delay: 1000,
+      callback: () => {
+        timeRemaining--;
+        if (timeRemaining <= 0) {
+          level++;
+          levelTime += 5;
+          timeRemaining = levelTime;
+          monsterHpBase += 1;
+        }
+        updateStats();
+      },
+      loop: true,
+    });
+
+    // Mainkan musik latar dengan volume rendah dan loop
+    bgMusic = this.sound.add('bgMusic', { volume: 0.3, loop: true });
+    bgMusic.play();
+
+    updateStats();
+  }
+
+  function update(time) {
+    monsters.getChildren().forEach(monster => {
+      this.physics.moveToObject(monster, wizard, 60 + level * 2);
+      updateHealthBar(monster);
+    });
+
+    updateHealthBar(wizard);
+
+    if (time > lastShotTime + shootDelay) {
+      let target = getNearestMonster();
+      if (target) {
+        let bullet = bullets.create(wizard.x, wizard.y, 'bullet');
+        bullet.damage = damage;
+        this.physics.moveToObject(bullet, target, 500);
+        lastShotTime = time;
+      }
+    }
+  }
+
+  function spawnMonster() {
+    let angle = Phaser.Math.FloatBetween(0, 2 * Math.PI);
+    let x = 400 + Math.cos(angle) * 500;
+    let y = 300 + Math.sin(angle) * 500;
+    let monster = monsters.create(x, y, 'monster');
+    monster.maxHp = monsterHpBase;
+    monster.hp = monster.maxHp;
+
+    monster.healthBar = game.scene.scenes[0].add.graphics();
+  }
+
+  function hitMonster(bullet, monster) {
+    bullet.destroy();
+    monster.hp -= bullet.damage;
+    if (monster.hp <= 0) {
+      monster.healthBar.destroy();
+      monster.destroy();
+      score += 10;
+      updateStats();
+    }
+  }
+
+  function updateHealthBar(entity) {
+    if (!entity.healthBar) {
+      entity.healthBar = game.scene.scenes[0].add.graphics();
+    }
+    entity.healthBar.clear();
+    let barWidth = 40;
+    let barHeight = 6;
+    let x = entity.x - barWidth / 2;
+    let y = entity.y - entity.height / 2 - 10;
+    entity.healthBar.fillStyle(0x555555);
+    entity.healthBar.fillRect(x, y, barWidth, barHeight);
+    let healthWidth = (entity.hp / entity.maxHp) * barWidth;
+    entity.healthBar.fillStyle(0xff0000);
+    entity.healthBar.fillRect(x, y, healthWidth, barHeight);
+  }
+
+  function getNearestMonster() {
+    let minDist = Infinity;
+    let nearest = null;
+    monsters.getChildren().forEach(monster => {
+      let dist = Phaser.Math.Distance.Between(wizard.x, wizard.y, monster.x, monster.y);
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = monster;
+      }
+    });
+    return nearest;
+  }
+
+  function monsterHitWizard(wizardObj, monster) {
+    wizard.hp -= 1;
+    updateStats();
+
+    if (wizard.hp <= 0) {
+      wizard.hp = 0;
+      updateStats();
+      this.physics.pause();
+      alert('Game Over! Penyihir kalah.');
+      window.location.reload();
+    }
+  }
+
+  function updateStats() {
+    statsText.setText(
+      `Poin: ${score} | Damage: ${damage} | Delay: ${shootDelay}ms | Level: ${level} | HP: ${wizard.hp}/${wizard.maxHp}`
+    );
+    levelTimerText.setText(`Waktu Level ${level}: ${timeRemaining}s`);
+    document.getElementById('stats').innerText =
+      `Poin: ${score}\nDamage: ${damage}\nDelay: ${shootDelay}ms\nLevel: ${level}\nHP: ${wizard.hp}/${wizard.maxHp}\nWaktu: ${timeRemaining}s`;
+  }
+
+  window.upgradeDamage = function () {
+    if (score >= 50) {
+      score -= 50;
+      damage += 1;
+      updateStats();
+    }
+  };
+
+  window.upgradeRate = function () {
+    if (score >= 50 && shootDelay > 200) {
+      score -= 50;
+      shootDelay -= 100;
+      updateStats();
+    }
+  };
+
+  window.toggleMusic = function () {
+    if (bgMusic.isPlaying) {
+      bgMusic.pause();
+    } else {
+      bgMusic.resume();
+    }
+  };
+</script>
+</body>
+  </html>
